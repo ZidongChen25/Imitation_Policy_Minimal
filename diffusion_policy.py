@@ -144,6 +144,15 @@ def inference():
     average_reward = np.mean(episode_rewards)
     print(f"✅ Average reward over {len(episode_rewards)} episodes: {average_reward:.2f}")
 
+import argparse
+
 if __name__ == "__main__":
-    train()
-    inference()
+    parser = argparse.ArgumentParser(description="Run training or inference.")
+    parser.add_argument('--mode', choices=['train', 'inference'], required=True, 
+                        help="Specify 'train' to train the model or 'inference' to run inference.")
+    args = parser.parse_args()
+
+    if args.mode == 'train':
+        train()  # 只运行训练
+    elif args.mode == 'inference':
+        inference()  # 只运行推理
