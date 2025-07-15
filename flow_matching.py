@@ -4,10 +4,10 @@ import torch.nn as nn
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 
-H = 1  # multi-step horizon
+H = 1  # horizon
 
 class FlowMatchingPolicy(nn.Module):
-    def __init__(self, obs_dim, action_dim, horizon=10, hidden_dim=128):
+    def __init__(self, obs_dim, action_dim, horizon=1, hidden_dim=128):
         super().__init__()
         self.horizon = horizon
         self.obs_encoder = nn.Sequential(
@@ -29,7 +29,6 @@ class FlowMatchingPolicy(nn.Module):
         x = self.input_proj(x)
         return self.mlp(x)
 
-# Flow Matching loss: see https://arxiv.org/abs/2306.10177
 def flow_matching_loss(policy, obs, action_seq_target, device):
     # action_seq_target: [B, action_dim * H], target action
     # Sample t in [0, 1]
@@ -39,7 +38,7 @@ def flow_matching_loss(policy, obs, action_seq_target, device):
     noise = torch.randn_like(action_seq_target)
     action_seq_noisy = action_seq_target * t + noise * (1 - t)
     pred_v = policy(obs, action_seq_noisy, t)
-    v_target = (action_seq_target - noise) #/ (1-t + 1e-6)
+    v_target = (action_seq_target - noise)  #This is the derivative of (action_seq_noisy-action_seq_target) respect to t
     return ((pred_v - v_target) ** 2).mean()
 
 device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
@@ -55,7 +54,7 @@ def train():
     epochs = 30000
     batch_size = 32
 
-    writer = SummaryWriter(log_dir="./logs/flow_matching_policy_H1")
+    writer = SummaryWriter(log_dir="./logs/flow_matching_policy")
 
     data = np.load("expert_demo.npz")
     observations = data['observations']
@@ -90,18 +89,18 @@ def train():
             print(f"Epoch {epoch}, Loss: {loss.item():.4f}")
 
     writer.close()
-    torch.save(policy.state_dict(), "./logs/flow_matching_policy_H1/flow_matching_policy_H1.pth")
+    torch.save(policy.state_dict(), "./logs/flow_matching_policy/flow_matching_policy.pth")
     print("✅ Model saved.")
 
-def inference():
-    env = gym.make("Pendulum-v1", render_mode='human')
+def inference(render_mode='rgb_array'):
+    env = gym.make("Pendulum-v1", render_mode=render_mode)
     obs_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
     action_low = -2.0
     action_high = 2.0
 
     policy = FlowMatchingPolicy(obs_dim, action_dim, horizon=H).to(device)
-    policy.load_state_dict(torch.load("./logs/flow_matching_policy_H1/flow_matching_policy_H1.pth", map_location=device))
+    policy.load_state_dict(torch.load("./logs/flow_matching_policy/flow_matching_policy.pth", map_location=device))
     policy.eval()
 
     data = np.load("expert_demo.npz")
@@ -138,6 +137,17 @@ def inference():
     average_reward = np.mean(episode_rewards)
     print(f"✅ Average reward over {len(episode_rewards)} episodes: {average_reward:.2f}")
 
+
+import argparse
 if __name__ == "__main__":
-    train()
-    inference()
+    parser = argparse.ArgumentParser(description="Run training or inference.")
+    parser.add_argument('--mode', choices=['train', 'inference_rgb_array', 'inference_human'], required=True, 
+                        help="Specify 'train' to train the model or 'inference_rgb_array' or 'inference_human' to run inference.")
+    args = parser.parse_args()
+
+    if args.mode == 'train':
+        train()  
+    elif args.mode == 'inference_rgb_array':
+        inference(render_mode='rgb_array')  
+    elif args.mode == 'inference_human':
+        inference(render_mode='human')  
