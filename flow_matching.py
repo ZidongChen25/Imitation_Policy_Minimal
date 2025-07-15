@@ -91,11 +91,22 @@ def train():
     writer.close()
     torch.save(policy.state_dict(), "./logs/flow_matching_policy/flow_matching_policy.pth")
     print("✅ Model saved.")
+from gymnasium.vector import AsyncVectorEnv
 
-def inference(render_mode='rgb_array'):
-    env = gym.make("Pendulum-v1", render_mode=render_mode)
-    obs_dim = env.observation_space.shape[0]
-    action_dim = env.action_space.shape[0]
+def make_env():
+    return lambda: gym.make("Pendulum-v1", render_mode="rgb_array")
+
+def inference(render_mode='rgb_array', num_envs=5):
+    if render_mode == "rgb_array":
+        env = AsyncVectorEnv([make_env() for _ in range(num_envs)])
+        obs_dim = env.single_observation_space.shape[0]
+        action_dim = env.single_action_space.shape[0]
+    else:
+        env = gym.make("Pendulum-v1", render_mode=render_mode)
+        obs_dim = env.observation_space.shape[0]
+        action_dim = env.action_space.shape[0]
+        num_envs = 1 
+
     action_low = -2.0
     action_high = 2.0
 
@@ -109,33 +120,79 @@ def inference(render_mode='rgb_array'):
     action_mean = data['action_mean']
     action_std = data['action_std']
 
-    episode_rewards = []
+    episode_rewards = np.zeros(num_envs)
+    terminated_flags = np.zeros(num_envs, dtype=bool)
 
-    for _ in range(5):
-        obs, _ = env.reset()
-        done = False
-        total_reward = 0.0
+    obs, _ = env.reset()
 
-        while not done:
-            obs_norm = (obs - obs_mean) / obs_std
+    while not terminated_flags.all():
+        obs_norm = (obs - obs_mean) / obs_std
+        if render_mode == 'rgb_array':
+            obs_tensor = torch.tensor(obs_norm, dtype=torch.float32, device=device)
+        else:
             obs_tensor = torch.tensor(obs_norm, dtype=torch.float32, device=device).unsqueeze(0)
-            # Start from random action, integrate flow
-            action_seq = torch.randn((1, action_dim * H), device=device)
-            steps = T
-            for i in range(steps):
-                t = torch.full((1, 1), i / steps, device=device)
-                v = policy(obs_tensor, action_seq, t)
-                action_seq = action_seq + v * (1.0 / steps)
-            action_norm = action_seq.view(1, H, action_dim)[:, 0, :].squeeze(0).cpu().detach().numpy()
-            final_action = action_norm * action_std + action_mean
-            final_action = np.clip(final_action, action_low, action_high)
-            obs, reward, terminated, truncated, info = env.step(final_action)
-            total_reward += reward
-            done = terminated or truncated
-        episode_rewards.append(total_reward)
+
+        action_seq = torch.randn((num_envs, action_dim * H), device=device)
+        for t_step in range(T):
+            t_tensor = torch.full((num_envs, 1), t_step / T, device=device)
+            v = policy(obs_tensor, action_seq, t_tensor)
+            action_seq = action_seq + v * (1.0 / T)
+
+        action_norm = action_seq.view(num_envs, H, action_dim)[:, 0, :].squeeze(0).cpu().detach().numpy()
+        final_action = action_norm * action_std + action_mean
+        final_action = np.clip(final_action, action_low, action_high)
+
+        obs, reward, terminated, truncated, info = env.step(final_action)
+        active = ~(terminated_flags | terminated | truncated)
+        episode_rewards += reward * active
+        terminated_flags |= (terminated | truncated)
+
     env.close()
-    average_reward = np.mean(episode_rewards)
-    print(f"✅ Average reward over {len(episode_rewards)} episodes: {average_reward:.2f}")
+    print(f"✅ Average reward over {num_envs} parallel episodes: {np.mean(episode_rewards):.2f}")
+# def inference(render_mode='rgb_array'):
+#     env = gym.make("Pendulum-v1", render_mode=render_mode)
+#     obs_dim = env.observation_space.shape[0]
+#     action_dim = env.action_space.shape[0]
+#     action_low = -2.0
+#     action_high = 2.0
+
+#     policy = FlowMatchingPolicy(obs_dim, action_dim, horizon=H).to(device)
+#     policy.load_state_dict(torch.load("./logs/flow_matching_policy/flow_matching_policy.pth", map_location=device))
+#     policy.eval()
+
+#     data = np.load("expert_demo.npz")
+#     obs_mean = data['obs_mean']
+#     obs_std = data['obs_std']
+#     action_mean = data['action_mean']
+#     action_std = data['action_std']
+
+#     episode_rewards = []
+
+#     for _ in range(5):
+#         obs, _ = env.reset()
+#         done = False
+#         total_reward = 0.0
+
+#         while not done:
+#             obs_norm = (obs - obs_mean) / obs_std
+#             obs_tensor = torch.tensor(obs_norm, dtype=torch.float32, device=device).unsqueeze(0)
+#             # Start from random action, integrate flow
+#             action_seq = torch.randn((1, action_dim * H), device=device)
+#             steps = T
+#             for i in range(steps):
+#                 t = torch.full((1, 1), i / steps, device=device)
+#                 v = policy(obs_tensor, action_seq, t)
+#                 action_seq = action_seq + v * (1.0 / steps)
+#             action_norm = action_seq.view(1, H, action_dim)[:, 0, :].squeeze(0).cpu().detach().numpy()
+#             final_action = action_norm * action_std + action_mean
+#             final_action = np.clip(final_action, action_low, action_high)
+#             obs, reward, terminated, truncated, info = env.step(final_action)
+#             total_reward += reward
+#             done = terminated or truncated
+#         episode_rewards.append(total_reward)
+#     env.close()
+#     average_reward = np.mean(episode_rewards)
+#     print(f"✅ Average reward over {len(episode_rewards)} episodes: {average_reward:.2f}")
 
 
 import argparse
