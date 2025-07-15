@@ -1,11 +1,11 @@
 
-# Imitation Policy Minimal
+# 🧠 Imitation Policy Minimal
 
-Are you tired of constantly switching between multiple code files, original papers, and tutorials?
-Frustrated by installing countless dependencies—only to run into conflicts—when all you want is to run simple demos and learn from the code?
+Are you tired of constantly switching between code files, papers, and tutorials?  
+Frustrated by endless dependency installations and environment conflicts—when all you want is to run simple demos and learn from the code?
 
-Imitation Policy Minimal is a minimal and educational implementation of imitation learning based policies for embodied AI.
-This project integrates both Diffusion Policy and Flow Matching for simple control tasks like Pendulum-v1.
+**Imitation Policy Minimal** is a clean, educational implementation of imitation learning-based policies for embodied AI.  
+This project integrates both **Diffusion Policy** and **Flow Matching** for simple control tasks like `Pendulum-v1`.
 
 ---
 
@@ -30,9 +30,9 @@ conda activate diffusion_policy_minimal
 ```bash
 pip install torch torchvision gymnasium tensorboard stable-baselines3 numpy
 ```
-## How to Use
+## 🚀 How to Use
 
-Imitation learning policy needs expert demonstrations, for example, human demonstration or we can train a RL policy such as PPO, SAC, DDPG. In this easy environment Pendulum, we use PPO to train an expert policy.
+Imitation learning policy requires expert demonstrations, for example, human demonstration or we can train a RL policy such as PPO, SAC, DDPG. In this easy environment Pendulum, we use PPO to train an expert policy.
 
 1. Generate expert demonstrations:
 
@@ -59,9 +59,21 @@ Imitation learning policy needs expert demonstrations, for example, human demons
     # or
     python flow_matching.py --mode train
     ```
-Training logs will be saved automatically and can be visualized via TensorBoard. This is an easy task with a lightweight model, and it can be trained within 5 minutes on an M4 MacBook Air.
+Training logs will be saved automatically and can be visualized via TensorBoard. 
 
-5. Evaluate The policy will be evaluated in the Pendulum environment.
+This is an easy task with a lightweight model, and it can be trained within 5 minutes on an MacBook Air.
 
-python diffusion_policy.py --mode inference
+5. Evaluate The policy:
+   ```bash
+   # Diffusion Policy
+   python diffusion_policy.py --mode inference_rgb_array  # Outputs average reward over 5 episodes
+   python diffusion_policy.py --mode inference_human       # Visualizes 1 episode
+
+   # Flow Matching Policy
+   python flow_matching.py --mode inference_rgb_array      
+   python flow_matching.py --mode inference_human
+   ```
+## References:
+- Original paper: [Diffusion Policy](https://arxiv.org/abs/2303.04137v5),
+                  [Flow matching](https://arxiv.org/abs/2210.02747)
 - Environment: [Pendulum](https://gymnasium.farama.org/environments/classic_control/pendulum/)
