@@ -28,8 +28,10 @@ conda activate diffusion_policy_minimal
 ### Install required packages
 
 ```bash
-pip install torch torchvision gymnasium tensorboard stable-baselines3 numpy
+pip install torch gymnasium tensorboard stable-baselines3 numpy pygame
 ```
+Users planning to leverage GPU acceleration should install the appropriate CUDA-enabled build of PyTorch (e.g., pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118) or follow PyTorch’s official installation instructions for their CUDA version. For CPU-only use, the standard PyPI build of torch is sufficient.
+
 ## 🚀 How to Use
 
 Imitation learning policy requires expert demonstrations, for example, human demonstration or we can train a RL policy such as PPO, SAC, DDPG. In this easy environment Pendulum, we use PPO to train an expert policy.
