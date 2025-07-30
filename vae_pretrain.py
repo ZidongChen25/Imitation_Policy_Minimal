@@ -17,7 +17,12 @@ T = 10  # number of flow steps per update
 
 
 class VAE(nn.Module):
-    def __init__(self, action_dim, horizon=1, hidden_dim=512, latent_dim=64):
+    def __init__(self,
+                 action_dim,
+                 horizon=1,
+                 hidden_dim=512,
+                 latent_dim=64,
+                 dropout_p=0.1):
         super().__init__()
         self.horizon = horizon
         self.input_dim = action_dim * horizon
@@ -27,18 +32,22 @@ class VAE(nn.Module):
         self.encoder = nn.Sequential(
             nn.Linear(self.input_dim, hidden_dim),
             nn.GELU(),
+            nn.Dropout(p=dropout_p),
             nn.Linear(hidden_dim, hidden_dim),
             nn.GELU(),
+            nn.Dropout(p=dropout_p),
         )
-        self.fc_mu = nn.Linear(hidden_dim, latent_dim)
+        self.fc_mu     = nn.Linear(hidden_dim, latent_dim)
         self.fc_logvar = nn.Linear(hidden_dim, latent_dim)
 
         # Decoder: z -> hidden -> recon_x
         self.decoder = nn.Sequential(
             nn.Linear(latent_dim, hidden_dim),
             nn.GELU(),
+            nn.Dropout(p=dropout_p),
             nn.Linear(hidden_dim, hidden_dim),
             nn.GELU(),
+            nn.Dropout(p=dropout_p),
             nn.Linear(hidden_dim, self.input_dim),
         )
 
@@ -117,13 +126,12 @@ def pretrain():
     """VAE pretraining phase"""
     # --- Environment & model setup ---
     env = gym.make("Pendulum-v1")
-    obs_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
 
     pretrain_model = VAE(action_dim, horizon=H, hidden_dim=512, latent_dim=64).to(device)
     pretrain_optimizer = torch.optim.Adam(pretrain_model.parameters(), lr=1e-4)
 
-    pretrain_epochs = 30#000
+    pretrain_epochs = 30000
     batch_size = 128
 
     writer = SummaryWriter(log_dir="./logs/flow_matching_policy/pretrain")
@@ -139,8 +147,9 @@ def pretrain():
     action_std = data["action_std"]
 
     N = len(observations) - H
-    num_train = N // 100
-
+    num_train = N // 500
+    print(111111111111111111111111111111)
+    print(num_train)
     # build (obs, action_seq) pairs
     demos = []
     for i in range(num_train):
@@ -172,22 +181,39 @@ def pretrain():
     torch.save(pretrain_model.state_dict(),
                "./logs/flow_matching_policy/pretrain_model.pth")
     
-    # Generate noise samples for visualization
+
+
+    # Plot distribution of expert actions
     num_samples = 10000
     with torch.no_grad():
-        z = torch.randn(num_samples, pretrain_model.latent_dim)
+        # VAE 生成的噪声（已是 normalized scale）
+        z = torch.randn(num_samples, pretrain_model.latent_dim, device=device)
         noise = pretrain_model.decode(z).cpu().numpy()
         noise_flat = noise.flatten()
 
-    # Plot distribution of expert actions
-    plt.figure()
-    plt.hist(actions_flat, bins=50, alpha=0.7, label='Expert Actions')
-    plt.hist(noise_flat, bins=50, alpha=0.7, label='VAE Generated')
-    plt.title("Action Distributions Comparison")
-    plt.xlabel("Action Value")
-    plt.ylabel("Frequency")
-    plt.legend()
-    plt.savefig("./logs/flow_matching_policy/action_distributions.png")
+    # 计算归一化后的 expert actions
+    # actions: [N, action_dim], action_mean/std 是标量或与 action_dim 对应的向量
+    actions_norm = (actions - action_mean) / action_std
+    expert_norm_flat = actions_norm.flatten()
+
+    # 并列子图展示
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    # 左图：归一化后的专家动作分布
+    axes[0].hist(expert_norm_flat, bins=50, alpha=0.7)
+    axes[0].set_title("Normalized Expert Actions")
+    axes[0].set_xlabel("Normalized Action Value")
+    axes[0].set_ylabel("Frequency")
+
+    # 右图：VAE 生成样本分布
+    axes[1].hist(noise_flat, bins=50, alpha=0.7)
+    axes[1].set_title("VAE Generated Samples")
+    axes[1].set_xlabel("Normalized Action Value")
+    axes[1].set_ylabel("Frequency")
+
+    plt.tight_layout()
+    # 保存新图
+    plt.savefig("./logs/flow_matching_policy/action_distributions_compare.png")
     plt.show()
     
     writer.close()
@@ -212,7 +238,7 @@ def train_flow_matching():
     for p in pretrain_model.parameters():
         p.requires_grad = False
 
-    epochs = 30#000
+    epochs = 30000
     batch_size = 32
 
     writer = SummaryWriter(log_dir="./logs/flow_matching_policy/flow_matching")
