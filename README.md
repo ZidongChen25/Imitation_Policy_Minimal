@@ -1,5 +1,5 @@
 
-# 🧠 Imitation Policy Minimal
+# 🤖 Imitation Policy Minimal
 
 Are you tired of constantly switching between code files, papers, and tutorials?  
 Frustrated by endless dependency installations and environment conflicts—when all you want is to run simple demos and learn from the code?

@@ -53,7 +53,7 @@ def train():
 
     policy = DiffusionPolicy(obs_dim, action_dim, horizon=H).to(device)
     optimizer = torch.optim.Adam(policy.parameters(), lr=5e-4)
-    epochs = 30000
+    epochs = 40000
     batch_size = 32
 
     writer = SummaryWriter(log_dir="./logs/diffusion_policy")

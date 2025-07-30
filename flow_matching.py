@@ -4,7 +4,7 @@ import torch.nn as nn
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 
-H = 1  # horizon
+H = 1 # horizon
 
 class FlowMatchingPolicy(nn.Module):
     def __init__(self, obs_dim, action_dim, horizon=1, hidden_dim=128):
@@ -149,50 +149,7 @@ def inference(render_mode='rgb_array', num_envs=5):
 
     env.close()
     print(f"✅ Average reward over {num_envs} parallel episodes: {np.mean(episode_rewards):.2f}")
-# def inference(render_mode='rgb_array'):
-#     env = gym.make("Pendulum-v1", render_mode=render_mode)
-#     obs_dim = env.observation_space.shape[0]
-#     action_dim = env.action_space.shape[0]
-#     action_low = -2.0
-#     action_high = 2.0
-
-#     policy = FlowMatchingPolicy(obs_dim, action_dim, horizon=H).to(device)
-#     policy.load_state_dict(torch.load("./logs/flow_matching_policy/flow_matching_policy.pth", map_location=device))
-#     policy.eval()
-
-#     data = np.load("expert_demo.npz")
-#     obs_mean = data['obs_mean']
-#     obs_std = data['obs_std']
-#     action_mean = data['action_mean']
-#     action_std = data['action_std']
-
-#     episode_rewards = []
-
-#     for _ in range(5):
-#         obs, _ = env.reset()
-#         done = False
-#         total_reward = 0.0
-
-#         while not done:
-#             obs_norm = (obs - obs_mean) / obs_std
-#             obs_tensor = torch.tensor(obs_norm, dtype=torch.float32, device=device).unsqueeze(0)
-#             # Start from random action, integrate flow
-#             action_seq = torch.randn((1, action_dim * H), device=device)
-#             steps = T
-#             for i in range(steps):
-#                 t = torch.full((1, 1), i / steps, device=device)
-#                 v = policy(obs_tensor, action_seq, t)
-#                 action_seq = action_seq + v * (1.0 / steps)
-#             action_norm = action_seq.view(1, H, action_dim)[:, 0, :].squeeze(0).cpu().detach().numpy()
-#             final_action = action_norm * action_std + action_mean
-#             final_action = np.clip(final_action, action_low, action_high)
-#             obs, reward, terminated, truncated, info = env.step(final_action)
-#             total_reward += reward
-#             done = terminated or truncated
-#         episode_rewards.append(total_reward)
-#     env.close()
-#     average_reward = np.mean(episode_rewards)
-#     print(f"✅ Average reward over {len(episode_rewards)} episodes: {average_reward:.2f}")
+norm = (obs - obs_mean) / obs_std
 
 
 import argparse
