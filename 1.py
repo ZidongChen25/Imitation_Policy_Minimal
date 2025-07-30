@@ -73,6 +73,7 @@ def train():
     pretrain_epochs=10000
     epochs = 30000
     batch_size = 32
+    pretrain_batch_size = 128
     criterion = nn.MSELoss()
     writer = SummaryWriter(log_dir="./logs/flow_matching_policy")
 
@@ -90,14 +91,14 @@ def train():
         obs = (observations[i] - obs_mean) / obs_std
         action_seq = (actions[i:i+H] - action_mean) / action_std
         demos.append((obs, action_seq))
-    # noise should have size [B, action_dim * H]
-    fixed_noise = torch.randn(n, action_dim * H, dtype=torch.float32).to(device) #这里应该是先生成一样长的再batch
+    # noise should have size [n, action_dim * H]
+    fixed_noise = torch.randn(n, action_dim * H, dtype=torch.float32).to(device)
     for epoch in range(pretrain_epochs):
-        indices = np.random.choice(len(demos), batch_size)
+        indices = np.random.choice(len(demos), pretrain_batch_size)
         
         batch = [demos[i] for i in indices]
         action_seq_batch = torch.tensor(np.stack([b[1] for b in batch]), dtype=torch.float32).to(device)
-        action_seq_batch = action_seq_batch.view(batch_size, -1)
+        action_seq_batch = action_seq_batch.view(pretrain_batch_size, -1)
         fixed_noise_batch=fixed_noise[indices]
         predicted_target= model.forward(fixed_noise_batch)
         loss=criterion(predicted_target,action_seq_batch)
@@ -106,6 +107,15 @@ def train():
         pretrain_optimizer.step()
         if epoch % 1000 == 0:
             print(f"Epoch {epoch}, Loss: {loss.item():.4f}")
+    # Save pretrained model and freeze its parameters
+    torch.save(model.state_dict(), "./logs/flow_matching_policy/noise_model.pth")
+    print("✅ Noise model saved and frozen.")
+    
+    # Freeze the pretrained model parameters
+    for param in model.parameters():
+        param.requires_grad = False
+    model.eval()
+    
     print("pretrain completed, start flow matching")
 
     for epoch in range(epochs):
@@ -128,13 +138,13 @@ def train():
 
     writer.close()
     torch.save(policy.state_dict(), "./logs/flow_matching_policy/flow_matching_policy.pth")
-    print("✅ Model saved.")
+    print("✅ Policy model saved.")
 from gymnasium.vector import AsyncVectorEnv
 
 def make_env():
     return lambda: gym.make("Pendulum-v1", render_mode="rgb_array")
 
-def inference(render_mode='rgb_array', num_envs=5):
+def inference(render_mode='rgb_array', num_envs=5, num_iterations=1):
     if render_mode == "rgb_array":
         env = AsyncVectorEnv([make_env() for _ in range(num_envs)])
         obs_dim = env.single_observation_space.shape[0]
@@ -151,6 +161,11 @@ def inference(render_mode='rgb_array', num_envs=5):
     policy = FlowMatchingPolicy(obs_dim, action_dim, horizon=H).to(device)
     policy.load_state_dict(torch.load("./logs/flow_matching_policy/flow_matching_policy.pth", map_location=device))
     policy.eval()
+    
+    # Load pretrained noise model
+    noise_model = NoiseToAction(action_dim, horizon=H).to(device)
+    noise_model.load_state_dict(torch.load("./logs/flow_matching_policy/noise_model.pth", map_location=device))
+    noise_model.eval()
 
     data = np.load("expert_demo.npz")
     obs_mean = data['obs_mean']
@@ -158,35 +173,43 @@ def inference(render_mode='rgb_array', num_envs=5):
     action_mean = data['action_mean']
     action_std = data['action_std']
 
-    episode_rewards = np.zeros(num_envs)
-    terminated_flags = np.zeros(num_envs, dtype=bool)
+    all_rewards = []
+    
+    for iteration in range(num_iterations):
+        episode_rewards = np.zeros(num_envs)
+        terminated_flags = np.zeros(num_envs, dtype=bool)
 
-    obs, _ = env.reset()
+        obs, _ = env.reset()
 
-    while not terminated_flags.all():
-        obs_norm = (obs - obs_mean) / obs_std
-        if render_mode == 'rgb_array':
-            obs_tensor = torch.tensor(obs_norm, dtype=torch.float32, device=device)
-        else:
-            obs_tensor = torch.tensor(obs_norm, dtype=torch.float32, device=device).unsqueeze(0)
+        while not terminated_flags.all():
+            obs_norm = (obs - obs_mean) / obs_std
+            if render_mode == 'rgb_array':
+                obs_tensor = torch.tensor(obs_norm, dtype=torch.float32, device=device)
+            else:
+                obs_tensor = torch.tensor(obs_norm, dtype=torch.float32, device=device).unsqueeze(0)
 
-        action_seq = torch.randn((num_envs, action_dim * H), device=device)
-        for t_step in range(T):
-            t_tensor = torch.full((num_envs, 1), t_step / T, device=device)
-            v = policy(obs_tensor, action_seq, t_tensor)
-            action_seq = action_seq + v * (1.0 / T)
+            # Initialize action sequence using pretrained noise model
+            raw_noise = torch.randn((num_envs, action_dim * H), device=device)
+            action_seq = noise_model(raw_noise)
+            for t_step in range(T):
+                t_tensor = torch.full((num_envs, 1), t_step / T, device=device)
+                v = policy(obs_tensor, action_seq, t_tensor)
+                action_seq = action_seq + v * (1.0 / T)
 
-        action_norm = action_seq.view(num_envs, H, action_dim)[:, 0, :].squeeze(0).cpu().detach().numpy()
-        final_action = action_norm * action_std + action_mean
-        final_action = np.clip(final_action, action_low, action_high)
+            action_norm = action_seq.view(num_envs, H, action_dim)[:, 0, :].squeeze(0).cpu().detach().numpy()
+            final_action = action_norm * action_std + action_mean
+            final_action = np.clip(final_action, action_low, action_high)
 
-        obs, reward, terminated, truncated, info = env.step(final_action)
-        active = ~(terminated_flags | terminated | truncated)
-        episode_rewards += reward * active
-        terminated_flags |= (terminated | truncated)
+            obs, reward, terminated, truncated, info = env.step(final_action)
+            active = ~(terminated_flags | terminated | truncated)
+            episode_rewards += reward * active
+            terminated_flags |= (terminated | truncated)
+        
+        all_rewards.extend(episode_rewards)
+        print(f"Iteration {iteration + 1}/{num_iterations}: Average reward = {np.mean(episode_rewards):.2f}")
 
     env.close()
-    print(f"✅ Average reward over {num_envs} parallel episodes: {np.mean(episode_rewards):.2f}")
+    print(f"✅ Overall average reward over {num_iterations * num_envs} episodes: {np.mean(all_rewards):.2f}")
 
 
 
@@ -195,11 +218,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run training or inference.")
     parser.add_argument('--mode', choices=['train', 'inference_rgb_array', 'inference_human'], required=True, 
                         help="Specify 'train' to train the model or 'inference_rgb_array' or 'inference_human' to run inference.")
+    parser.add_argument('--num_envs', type=int, default=5, help="Number of parallel environments for inference (default: 5)")
+    parser.add_argument('--num_iterations', type=int, default=1, help="Number of inference iterations (default: 1)")
     args = parser.parse_args()
 
     if args.mode == 'train':
         train()  
     elif args.mode == 'inference_rgb_array':
-        inference(render_mode='rgb_array')  
+        inference(render_mode='rgb_array', num_envs=args.num_envs, num_iterations=args.num_iterations)  
     elif args.mode == 'inference_human':
-        inference(render_mode='human') 
+        inference(render_mode='human', num_envs=args.num_envs, num_iterations=args.num_iterations) 
